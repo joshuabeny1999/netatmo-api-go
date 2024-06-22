@@ -150,7 +150,6 @@ func NewClient(config Config) (*Client, error) {
 
 	now := time.Now()
 	if config.AccessToken != "" && config.TokenValidUntil.After(now) {
-		fmt.Print("Using existing token")
 		token := &oauth2.Token{
 			AccessToken:  config.AccessToken,
 			RefreshToken: config.RefreshToken,
