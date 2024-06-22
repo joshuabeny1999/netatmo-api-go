@@ -3,7 +3,7 @@ Simple API to access Netatmo weather station data written in Go.
 
 ## Quickstart
 
-- [Create a new netatmo app](https://dev.netatmo.com/dev/createapp)
+- [Create a new netatmo app](https://dev.netatmo.com/apps/createanapp#form)
 - Generate a new token using the token generator. Scope needed is `read_station`: ![token_generator_netatmo.png](token_generator_netatmo.png)
 - Edit ```test/sample.conf```with your credentials 
 - run ```go run test/netatmo-api-test.go -f test/sample.conf```
