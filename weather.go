@@ -149,9 +149,6 @@ func NewClient(config Config) (*Client, error) {
 	}
 
 	now := time.Now()
-	fmt.Println("Now: ", now)
-	fmt.Println("TokenValidUntil: ", config.TokenValidUntil)
-	fmt.Printf("TokenValidUntil.After(now): %v\n", config.TokenValidUntil.After(now))
 	if config.AccessToken != "" && config.TokenValidUntil.After(now) {
 		fmt.Print("Using existing token")
 		token := &oauth2.Token{
