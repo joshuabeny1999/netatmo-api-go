@@ -14,9 +14,11 @@ import (
 var fConfig = flag.String("f", "", "Configuration file")
 
 type NetatmoConfig struct {
-	ClientID     string
-	ClientSecret string
-	RefreshToken string
+	ClientID        string
+	ClientSecret    string
+	RefreshToken    string
+	AccessToken     string
+	TokenValidUntil time.Time
 }
 
 var config NetatmoConfig
@@ -36,9 +38,11 @@ func main() {
 	}
 
 	n, err := netatmo.NewClient(netatmo.Config{
-		ClientID:     config.ClientID,
-		ClientSecret: config.ClientSecret,
-		RefreshToken: config.RefreshToken,
+		ClientID:        config.ClientID,
+		ClientSecret:    config.ClientSecret,
+		AccessToken:     config.AccessToken,
+		TokenValidUntil: config.TokenValidUntil,
+		RefreshToken:    config.RefreshToken,
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -98,5 +102,26 @@ func main() {
 		}
 	} else {
 		fmt.Printf("Refresh token unchanged: %s\n", config.RefreshToken)
+	}
+
+	// save the access token if changed
+	if config.AccessToken != n.AccessToken {
+		config.AccessToken = n.AccessToken
+		config.TokenValidUntil = n.TokenValidUntil
+		fmt.Printf("Saving new access token: %s, Valid until: %s\n", config.AccessToken, config.TokenValidUntil)
+		file, err := os.Create(*fConfig)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		defer file.Close()
+
+		encoder := toml.NewEncoder(file)
+		if err := encoder.Encode(config); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Printf("Access token unchanged: %s, Valid until: %s\n", config.AccessToken, config.TokenValidUntil)
 	}
 }

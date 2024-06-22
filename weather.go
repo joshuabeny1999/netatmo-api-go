@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 )
@@ -26,18 +27,22 @@ const (
 // Username : Your netatmo account username
 // Password : Your netatmo account password
 type Config struct {
-	ClientID     string
-	ClientSecret string
-	RefreshToken string
+	ClientID        string
+	ClientSecret    string
+	RefreshToken    string
+	AccessToken     string
+	TokenValidUntil time.Time
 }
 
 // Client use to make request to Netatmo API
 type Client struct {
-	oauth        *oauth2.Config
-	httpClient   *http.Client
-	httpResponse *http.Response
-	Dc           *DeviceCollection
-	RefreshToken string
+	oauth           *oauth2.Config
+	httpClient      *http.Client
+	httpResponse    *http.Response
+	Dc              *DeviceCollection
+	RefreshToken    string
+	AccessToken     string
+	TokenValidUntil time.Time
 }
 
 // DeviceCollection hold all devices from netatmo account
@@ -143,22 +148,50 @@ func NewClient(config Config) (*Client, error) {
 		},
 	}
 
+	now := time.Now()
+	fmt.Println("Now: ", now)
+	fmt.Println("TokenValidUntil: ", config.TokenValidUntil)
+	fmt.Printf("TokenValidUntil.After(now): %v\n", config.TokenValidUntil.After(now))
+	if config.AccessToken != "" && config.TokenValidUntil.After(now) {
+		fmt.Print("Using existing token")
+		token := &oauth2.Token{
+			AccessToken:  config.AccessToken,
+			RefreshToken: config.RefreshToken,
+			Expiry:       config.TokenValidUntil,
+		}
+		return &Client{
+			oauth:           oauth,
+			httpClient:      oauth.Client(context.Background(), token),
+			Dc:              &DeviceCollection{},
+			AccessToken:     config.AccessToken,
+			RefreshToken:    config.RefreshToken,
+			TokenValidUntil: config.TokenValidUntil,
+		}, nil
+	}
+
+	// Zugriffstoken ist abgelaufen, hole ein neues mit dem Aktualisierungstoken
 	token := &oauth2.Token{
 		RefreshToken: config.RefreshToken,
 	}
 
-	// get new token and save it
 	token, err := oauth.TokenSource(context.Background(), token).Token()
 	if err != nil {
 		return nil, err
 	}
 
+	// Aktualisiere die Config mit dem neuen Zugriffstoken und dem Ablaufdatum
+	config.AccessToken = token.AccessToken
+	config.TokenValidUntil = token.Expiry
+
 	return &Client{
-		oauth:        oauth,
-		httpClient:   oauth.Client(context.Background(), token),
-		Dc:           &DeviceCollection{},
-		RefreshToken: token.RefreshToken,
+		oauth:           oauth,
+		httpClient:      oauth.Client(context.Background(), token),
+		Dc:              &DeviceCollection{},
+		AccessToken:     token.AccessToken,
+		TokenValidUntil: token.Expiry,
+		RefreshToken:    token.RefreshToken,
 	}, nil
+
 }
 
 // do a url encoded HTTP POST request
