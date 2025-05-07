@@ -1,3 +1,5 @@
+// api-test.go: simple CLI to exercise the Netatmo client (auto-persisting TOML)
+
 package main
 
 import (
@@ -6,122 +8,72 @@ import (
 	"os"
 	"time"
 
-	toml "github.com/BurntSushi/toml"
 	netatmo "github.com/joshuabeny1999/netatmo-api-go/v2"
 )
 
-// Command line flag
-var fConfig = flag.String("f", "", "Configuration file")
-
-type NetatmoConfig struct {
-	ClientID        string
-	ClientSecret    string
-	RefreshToken    string
-	AccessToken     string
-	TokenValidUntil time.Time
-}
-
-var config NetatmoConfig
+// Usage: go run api-test.go -f netatmo.toml
+var fConfig = flag.String("f", "", "Netatmo configuration file (TOML)")
 
 func main() {
-
-	// Parse command line flags
 	flag.Parse()
 	if *fConfig == "" {
-		fmt.Printf("Missing required argument -f\n")
-		os.Exit(0)
-	}
-
-	if _, err := toml.DecodeFile(*fConfig, &config); err != nil {
-		fmt.Printf("Cannot parse config file: %s\n", err)
+		fmt.Fprintln(os.Stderr, "Missing required argument -f")
 		os.Exit(1)
 	}
 
-	n, err := netatmo.NewClient(netatmo.Config{
-		ClientID:        config.ClientID,
-		ClientSecret:    config.ClientSecret,
-		AccessToken:     config.AccessToken,
-		TokenValidUntil: config.TokenValidUntil,
-		RefreshToken:    config.RefreshToken,
-	})
+	// Load and persistable-config
+	cfg, err := netatmo.LoadConfig(*fConfig)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintf(os.Stderr, "Cannot load config %s: %v\n", *fConfig, err)
 		os.Exit(1)
 	}
 
-	dc, err := n.Read()
+	// Initialize client (will auto-refresh and save tokens)
+	client, err := netatmo.NewClient(cfg)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintf(os.Stderr, "Failed to initialize Netatmo client: %v\n", err)
 		os.Exit(1)
 	}
 
-	ct := time.Now().UTC().Unix()
+	// Fetch stations and modules
+	dc, err := client.Read()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Netatmo Read error: %v\n", err)
+		os.Exit(1)
+	}
 
+	// Print data
+	now := time.Now().UTC().Unix()
 	for _, station := range dc.Stations() {
-		fmt.Printf("Station : %s\n", station.StationName)
-		fmt.Printf("\tCity: %s\n\tCountry: %s\n\tTimezone: %s\n\tLongitude: %f\n\tLatitude: %f\n\tAltitude: %d\n\n", station.Place.City, station.Place.Country, station.Place.Timezone, *station.Place.Location.Longitude, *station.Place.Location.Latitude, *station.Place.Altitude)
+		fmt.Printf("Station: %s\n", station.StationName)
+		fmt.Printf(
+			"\tCity: %s\n\tCountry: %s\n\tTimezone: %s\n\tLongitude: %v\n\tLatitude: %v\n\tAltitude: %v\n\n",
+			station.Place.City,
+			station.Place.Country,
+			station.Place.Timezone,
+			station.Place.Location.Longitude,
+			station.Place.Location.Latitude,
+			station.Place.Altitude,
+		)
 
 		for _, module := range station.Modules() {
-			fmt.Printf("\tModule : %s\n", module.ModuleName)
+			fmt.Printf("\tModule: %s\n", module.ModuleName)
 
-			{
-				if module.DashboardData.LastMeasure == nil {
-					fmt.Printf("\t\tSkipping %s, no measurement data available.\n", module.ModuleName)
-					continue
-				}
-				ts, data := module.Info()
-				for dataName, value := range data {
-					fmt.Printf("\t\t%s : %v (updated %ds ago)\n", dataName, value, ct-ts)
+			// Info (battery, wifi, etc)
+			if module.DashboardData.LastMeasure != nil {
+				ts, info := module.Info()
+				for k, v := range info {
+					fmt.Printf("\t\t%s: %v (age %ds)\n", k, v, now-ts)
 				}
 			}
 
-			{
+			// Data (temperature, humidity, etc)
+			if module.DashboardData.LastMeasure != nil {
 				ts, data := module.Data()
-				for dataName, value := range data {
-					fmt.Printf("\t\t%s : %v (updated %ds ago)\n", dataName, value, ct-ts)
+				for k, v := range data {
+					fmt.Printf("\t\t%s: %v (age %ds)\n", k, v, now-ts)
 				}
 			}
 		}
-	}
-
-	// save the refresh token if changed
-	if config.RefreshToken != n.RefreshToken {
-		config.RefreshToken = n.RefreshToken
-		fmt.Printf("Saving new refresh token: %s\n", config.RefreshToken)
-		file, err := os.Create(*fConfig)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		defer file.Close()
-
-		encoder := toml.NewEncoder(file)
-		if err := encoder.Encode(config); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-	} else {
-		fmt.Printf("Refresh token unchanged: %s\n", config.RefreshToken)
-	}
-
-	// save the access token if changed
-	if config.AccessToken != n.AccessToken {
-		config.AccessToken = n.AccessToken
-		config.TokenValidUntil = n.TokenValidUntil
-		fmt.Printf("Saving new access token: %s, Valid until: %s\n", config.AccessToken, config.TokenValidUntil)
-		file, err := os.Create(*fConfig)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		defer file.Close()
-
-		encoder := toml.NewEncoder(file)
-		if err := encoder.Encode(config); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-	} else {
-		fmt.Printf("Access token unchanged: %s, Valid until: %s\n", config.AccessToken, config.TokenValidUntil)
 	}
 }

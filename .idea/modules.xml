@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/netatmo-api-go.iml" filepath="$PROJECT_DIR$/.idea/netatmo-api-go.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../netatmo-influx-importer/.idea/netatmo-influx-importer.iml" filepath="$PROJECT_DIR$/../netatmo-influx-importer/.idea/netatmo-influx-importer.iml" />
     </modules>
   </component>
 </project>

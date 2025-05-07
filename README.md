@@ -1,56 +1,51 @@
 # netatmo-api-go
-Simple API to access Netatmo weather station data written in Go.
+Simple API to access Netatmo weather station data written in Go. Will auto update token if needed.
 
 ## Quickstart
 
 - [Create a new netatmo app](https://dev.netatmo.com/apps/createanapp#form)
 - Generate a new token using the token generator. Scope needed is `read_station`: ![token_generator_netatmo.png](token_generator_netatmo.png)
-- Edit ```test/sample.conf```with your credentials 
-- run ```go run test/netatmo-api-test.go -f test/sample.conf```
+- Edit ```test/netatmo.toml```with your credentials 
+- run ```go run test/netatmo-api-test.go -f test/netatmo.toml```
 - Output shall look like :
 ```
-Station : Home
+Station: Mein Zuhause (Wetterstation Innensensor)
         City: Bern
         Country: CH
         Timezone: Europe/Zurich
-        Longitude: 7.265078
-        Latitude: 46.565312
-        Altitude: 540               
-        Module : Chambre Elsa                              
-                BatteryPercent : 47 (updated 323s ago)     
-                RFStatus : 68 (updated 323s ago)           
-                Temperature : 22.8 (updated 323s ago)      
-                Humidity : 53 (updated 323s ago)           
-                CO2 : 446 (updated 323s ago)               
-        Module : Chambre parents                           
-                BatteryPercent : 50 (updated 323s ago)     
-                RFStatus : 71 (updated 323s ago)           
-                Temperature : 19.9 (updated 323s ago)      
-                Humidity : 61 (updated 323s ago)           
-                CO2 : 428 (updated 323s ago)               
-        Module : Chambre Jules                             
-                BatteryPercent : 46 (updated 323s ago)     
-                RFStatus : 60 (updated 323s ago)           
-                CO2 : 396 (updated 323s ago)               
-                Temperature : 22 (updated 323s ago)        
-                Humidity : 54 (updated 323s ago)           
-        Module : Exterieur   
-                BatteryPercent : 37 (updated 323s ago)     
-                RFStatus : 66 (updated 323s ago)           
-                Temperature : 23.4 (updated 323s ago)      
-                Humidity : 52 (updated 323s ago)           
-        Module : Pluie       
-                BatteryPercent : 72 (updated 9684499s ago)
-                RFStatus : 54 (updated 9684499s ago)       
-                Rain : 0.101 (updated 9684499s ago)        
-        Module : Living      
-                WifiStatus : 37 (updated 278s ago)         
-                Temperature : 24 (updated 278s ago)        
-                Humidity : 49 (updated 278s ago)           
-                CO2 : 733 (updated 278s ago)               
-                Noise : 50 (updated 278s ago)              
-                Pressure : 1028.1 (updated 278s ago)       
-                AbsolutePressure : 1008.4 (updated 278s ago)
+        Longitude: 0x14000098c38
+        Latitude: 0x14000098c3c
+        Altitude: 0x14000098c0c
+
+        Module: Wetterstation Aussensensor
+                BatteryPercent: 63 (age 399s)
+                RFStatus: 71 (age 399s)
+                MinTemp: 9.4 (age 399s)
+                MaxTemp: 13.5 (age 399s)
+                TempTrend: down (age 399s)
+                Humidity: 68 (age 399s)
+                Temperature: 13.1 (age 399s)
+        Module: Schlafzimmer Sensor
+                BatteryPercent: 61 (age 437s)
+                RFStatus: 63 (age 437s)
+                Humidity: 50 (age 437s)
+                CO2: 1600 (age 437s)
+                Temperature: 24.2 (age 437s)
+                MinTemp: 23.2 (age 437s)
+                MaxTemp: 24.2 (age 437s)
+                TempTrend: stable (age 437s)
+        Module: Wetterstation Innensensor
+                WifiStatus: 60 (age 395s)
+                Noise: 35 (age 395s)
+                PressureTrend: down (age 395s)
+                MinTemp: 24.1 (age 395s)
+                TempTrend: stable (age 395s)
+                Pressure: 1011.5 (age 395s)
+                AbsolutePressure: 963.2 (age 395s)
+                Temperature: 24.4 (age 395s)
+                MaxTemp: 24.5 (age 395s)
+                Humidity: 50 (age 395s)
+                CO2: 1376 (age 395s)
 ```
 
 ## Tips

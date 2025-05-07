@@ -6,70 +6,80 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"golang.org/x/oauth2"
 )
 
 const (
-	// DefaultBaseURL is netatmo api url
+	// DefaultBaseURL is Netatmo API URL
 	baseURL = "https://api.netatmo.com/"
-	// DefaultAuthURL is netatmo auth url
+	// DefaultAuthURL is Netatmo OAuth2 token endpoint
 	authURL = baseURL + "oauth2/token"
-	// DefaultDeviceURL is netatmo device url
-	deviceURL = baseURL + "/api/getstationsdata"
+	// DefaultDeviceURL is Netatmo stations data endpoint
+	deviceURL = baseURL + "api/getstationsdata"
 )
 
-// Config is used to specify credential to Netatmo API
-// ClientID : Client ID from netatmo app registration at http://dev.netatmo.com/dev/listapps
-// ClientSecret : Client app secret
-// Username : Your netatmo account username
-// Password : Your netatmo account password
+// Config holds OAuth2 credentials and token state, persisted to TOML.
 type Config struct {
-	ClientID        string
-	ClientSecret    string
-	RefreshToken    string
-	AccessToken     string
-	TokenValidUntil time.Time
+	ClientID        string    `toml:"client_id"`
+	ClientSecret    string    `toml:"client_secret"`
+	AccessToken     string    `toml:"access_token"`
+	RefreshToken    string    `toml:"refresh_token"`
+	TokenValidUntil time.Time `toml:"token_valid_until"`
+
+	path string     `toml:"-"`
+	mu   sync.Mutex `toml:"-"`
 }
 
-// Client use to make request to Netatmo API
+// LoadConfig reads a TOML file at path into a Config.
+func LoadConfig(path string) (*Config, error) {
+	var cfg Config
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to decode TOML config %q: %w", path, err)
+	}
+	cfg.path = path
+	return &cfg, nil
+}
+
+// saveConfig writes cfg back to its TOML file.
+func saveConfig(cfg *Config) error {
+	cfg.mu.Lock()
+	defer cfg.mu.Unlock()
+
+	file, err := os.Create(cfg.path)
+	if err != nil {
+		return fmt.Errorf("failed to open config file for writing: %w", err)
+	}
+	defer file.Close()
+
+	enc := toml.NewEncoder(file)
+	if err := enc.Encode(cfg); err != nil {
+		return fmt.Errorf("failed to encode config to TOML: %w", err)
+	}
+	return nil
+}
+
+// Client makes authenticated requests to the Netatmo API.
 type Client struct {
-	oauth           *oauth2.Config
-	httpClient      *http.Client
-	httpResponse    *http.Response
-	Dc              *DeviceCollection
-	RefreshToken    string
-	AccessToken     string
-	TokenValidUntil time.Time
+	oauth      *oauth2.Config
+	httpClient *http.Client
+	Dc         *DeviceCollection
+	cfg        *Config
 }
 
-// DeviceCollection hold all devices from netatmo account
+// DeviceCollection holds the list of devices from Netatmo.
 type DeviceCollection struct {
 	Body struct {
 		Devices []*Device `json:"devices"`
 	}
 }
 
-// Device is a station or a module
-// ID : Mac address
-// StationName : Station name (only for station)
-// ModuleName : Module name
-// BatteryPercent : Percentage of battery remaining
-// WifiStatus : Wifi status per Base station
-// RFStatus : Current radio status per module
-// Type : Module type :
-//
-//	"NAMain" : for the base station
-//	"NAModule1" : for the outdoor module
-//	"NAModule4" : for the additionnal indoor module
-//	"NAModule3" : for the rain gauge module
-//	"NAModule2" : for the wind gauge module
-//
-// DashboardData : Data collection from device sensors
-// DataType : List of available datas
-// LinkedModules : Associated modules (only for station)
+// Device represents a station or module.
 type Device struct {
 	ID             string `json:"_id"`
 	StationName    string `json:"station_name"`
@@ -80,27 +90,12 @@ type Device struct {
 	Type           string
 	DashboardData  DashboardData `json:"dashboard_data"`
 	Place          Place         `json:"place"`
-	//DataType      []string      `json:"data_type"`
-	LinkedModules []*Device `json:"modules"`
+	LinkedModules  []*Device     `json:"modules"`
 }
 
-// DashboardData is used to store sensor values
-// Temperature : Last temperature measure @ LastMeasure (in °C)
-// Humidity : Last humidity measured @ LastMeasure (in %)
-// CO2 : Last Co2 measured @ time_utc (in ppm)
-// Noise : Last noise measured @ LastMeasure (in db)
-// Pressure : Last Sea level pressure measured @ LastMeasure (in mb)
-// AbsolutePressure : Real measured pressure @ LastMeasure (in mb)
-// Rain : Last rain measured (in mm)
-// Rain1Hour : Amount of rain in last hour
-// Rain1Day : Amount of rain today
-// WindAngle : Current 5 min average wind direction @ LastMeasure (in °)
-// WindStrength : Current 5 min average wind speed @ LastMeasure (in km/h)
-// GustAngle : Direction of the last 5 min highest gust wind @ LastMeasure (in °)
-// GustStrength : Speed of the last 5 min highest gust wind @ LastMeasure (in km/h)
-// LastMeasure : Contains timestamp of last data received
+// DashboardData holds sensor measurements.
 type DashboardData struct {
-	Temperature      *float32 `json:"Temperature,omitempty"` // use pointer to detect ommitted field by json mapping
+	Temperature      *float32 `json:"Temperature,omitempty"`
 	MaxTemp          *float32 `json:"max_temp,omitempty"`
 	MinTemp          *float32 `json:"min_temp,omitempty"`
 	TempTrend        string   `json:"temp_trend,omitempty"`
@@ -120,6 +115,7 @@ type DashboardData struct {
 	LastMeasure      *int64   `json:"time_utc"`
 }
 
+// Place holds geolocation and location details.
 type Place struct {
 	Altitude *int32   `json:"altitude,omitempty"`
 	City     string   `json:"city,omitempty"`
@@ -128,6 +124,7 @@ type Place struct {
 	Location Location `json:"location,omitempty"`
 }
 
+// Location holds latitude/longitude.
 type Location struct {
 	Longitude *float32
 	Latitude  *float32
@@ -138,102 +135,84 @@ func (tp *Location) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &a)
 }
 
-// NewClient create a handle authentication to Netamo API
-func NewClient(config Config) (*Client, error) {
-	oauth := &oauth2.Config{
-		ClientID:     config.ClientID,
-		ClientSecret: config.ClientSecret,
-		Endpoint: oauth2.Endpoint{
-			TokenURL: authURL,
-		},
-	}
-
-	now := time.Now()
-	if config.AccessToken != "" && config.TokenValidUntil.After(now) {
-		token := &oauth2.Token{
-			AccessToken:  config.AccessToken,
-			RefreshToken: config.RefreshToken,
-			Expiry:       config.TokenValidUntil,
-		}
-		return &Client{
-			oauth:           oauth,
-			httpClient:      oauth.Client(context.Background(), token),
-			Dc:              &DeviceCollection{},
-			AccessToken:     config.AccessToken,
-			RefreshToken:    config.RefreshToken,
-			TokenValidUntil: config.TokenValidUntil,
-		}, nil
-	}
-
-	// Zugriffstoken ist abgelaufen, hole ein neues mit dem Aktualisierungstoken
-	token := &oauth2.Token{
-		RefreshToken: config.RefreshToken,
-	}
-
-	token, err := oauth.TokenSource(context.Background(), token).Token()
-	if err != nil {
-		return nil, err
-	}
-
-	// Aktualisiere die Config mit dem neuen Zugriffstoken und dem Ablaufdatum
-	config.AccessToken = token.AccessToken
-	config.TokenValidUntil = token.Expiry
-
-	return &Client{
-		oauth:           oauth,
-		httpClient:      oauth.Client(context.Background(), token),
-		Dc:              &DeviceCollection{},
-		AccessToken:     token.AccessToken,
-		TokenValidUntil: token.Expiry,
-		RefreshToken:    token.RefreshToken,
-	}, nil
-
+// savingSource wraps the oauth2.TokenSource to save tokens on refresh.
+type savingSource struct {
+	src oauth2.TokenSource
+	cfg *Config
 }
 
-// do a url encoded HTTP POST request
-func (c *Client) doHTTPPostForm(url string, data url.Values) (*http.Response, error) {
-
-	req, err := http.NewRequest("POST", url, strings.NewReader(data.Encode()))
+func (s *savingSource) Token() (*oauth2.Token, error) {
+	token, err := s.src.Token()
 	if err != nil {
 		return nil, err
 	}
+	s.cfg.mu.Lock()
+	s.cfg.AccessToken = token.AccessToken
+	s.cfg.RefreshToken = token.RefreshToken
+	s.cfg.TokenValidUntil = token.Expiry
+	s.cfg.mu.Unlock()
 
-	//req.ContentLength = int64(reader.Len())
+	if err := saveConfig(s.cfg); err != nil {
+		return nil, fmt.Errorf("error saving config: %w", err)
+	}
+	return token, nil
+}
+
+// NewClient initializes the Netatmo client with automatic token persistence.
+func NewClient(cfg *Config) (*Client, error) {
+	oauthCfg := &oauth2.Config{
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+		Endpoint:     oauth2.Endpoint{TokenURL: authURL},
+	}
+
+	// Seed the token (may be expired)
+	seed := &oauth2.Token{
+		AccessToken:  cfg.AccessToken,
+		RefreshToken: cfg.RefreshToken,
+		Expiry:       cfg.TokenValidUntil,
+	}
+
+	reuse := oauth2.ReuseTokenSource(seed, oauthCfg.TokenSource(context.Background(), seed))
+	saving := &savingSource{src: reuse, cfg: cfg}
+
+	client := &Client{
+		oauth:      oauthCfg,
+		httpClient: oauth2.NewClient(context.Background(), saving),
+		Dc:         &DeviceCollection{},
+		cfg:        cfg,
+	}
+	return client, nil
+}
+
+// doHTTPPostForm submits a POST form.
+func (c *Client) doHTTPPostForm(urlStr string, data url.Values) (*http.Response, error) {
+	req, err := http.NewRequest("POST", urlStr, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
 	return c.doHTTP(req)
 }
 
-// send http GET request
-func (c *Client) doHTTPGet(url string, data url.Values) (*http.Response, error) {
+// doHTTPGet submits a GET request.
+func (c *Client) doHTTPGet(urlStr string, data url.Values) (*http.Response, error) {
 	if data != nil {
-		url = url + "?" + data.Encode()
+		urlStr += "?" + data.Encode()
 	}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", urlStr, nil)
 	if err != nil {
 		return nil, err
 	}
-
 	return c.doHTTP(req)
 }
 
-// do a generic HTTP request
+// doHTTP executes an *http.Request using the OAuth2 client.
 func (c *Client) doHTTP(req *http.Request) (*http.Response, error) {
-
-	// debug
-	//debug, _ := httputil.DumpRequestOut(req, true)
-	//fmt.Printf("%s\n\n", debug)
-
-	var err error
-	c.httpResponse, err = c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return c.httpResponse, nil
+	return c.httpClient.Do(req)
 }
 
-// process HTTP response
-// Unmarshall received data into holder struct
+// processHTTPResponse checks status and unmarshals JSON.
 func processHTTPResponse(resp *http.Response, err error, holder interface{}) error {
 	if resp != nil {
 		defer resp.Body.Close()
@@ -241,34 +220,18 @@ func processHTTPResponse(resp *http.Response, err error, holder interface{}) err
 	if err != nil {
 		return err
 	}
-
-	// debug
-	//debug, _ := httputil.DumpResponse(resp, true)
-	//fmt.Printf("%s\n\n", debug)
-
-	// check http return code
-	if resp.StatusCode != 200 {
-		//bytes, _ := ioutil.ReadAll(resp.Body)
-		return fmt.Errorf("Bad HTTP return code %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad HTTP status: %d", resp.StatusCode)
 	}
-
-	// Unmarshall response into given struct
-	if err = json.NewDecoder(resp.Body).Decode(holder); err != nil {
-		return err
-	}
-
-	return nil
+	return json.NewDecoder(resp.Body).Decode(holder)
 }
 
-// GetStations returns the list of stations owned by the user, and their modules
+// Read retrieves station/module data.
 func (c *Client) Read() (*DeviceCollection, error) {
 	resp, err := c.doHTTPGet(deviceURL, url.Values{"app_type": {"app_station"}})
-	//dc := &DeviceCollection{}
-
 	if err = processHTTPResponse(resp, err, c.Dc); err != nil {
 		return nil, err
 	}
-
 	return c.Dc, nil
 }
 
@@ -284,10 +247,8 @@ func (dc *DeviceCollection) Stations() []*Device {
 
 // Modules returns associated device module
 func (d *Device) Modules() []*Device {
-	modules := d.LinkedModules
-	modules = append(modules, d)
-
-	return modules
+	list := append([]*Device(nil), d.LinkedModules...)
+	return append(list, d)
 }
 
 // Data returns timestamp and the list of sensor value for this module
